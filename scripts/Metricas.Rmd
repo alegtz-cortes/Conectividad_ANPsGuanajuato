@@ -10,4 +10,1295 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Descripción general
+En este script se generan las métricas a nivel parche, clase y paisaje para todas las escalas espaciales del estudio (Estado, COBIOCOM y ANP's). Correr una vez se tengan los insumos listos en formato raster, a la misma resolución, proyección y con las mismas etiquetas de categorías entre los tiempos a comparar.
 
+
+# MÉTRICAS A NIVEL DE PARCHE 
+# Mapas de métricas de parche y conversión a raster
+En esta sección se generaron las métricas a nivel de parche con el output tipo mapa (ggplot) y se busca
+convertirlo a formato raster para aplicar un análsis de cambio para cada parche del paisaje.
+```{r}
+#MÉTRICAS DE PARCHE FINALES PARA EL 2009 (raster corregido de cuerpos de agua)
+plot(edo09ca)
+
+#obteniendo los mapas en loop  
+#lista con las métricas finales y listas vacías para el loop
+
+finales_parche <- list("lsm_p_area", "lsm_p_shape","lsm_p_circle", "lsm_p_ncore", "lsm_p_cai", "lsm_p_enn", "lsm_p_shape")
+mapas <- list()
+spat_df <- list()
+rasters <- list()
+
+
+# ESTADO ~ AÑO 2009
+for(i in 1:length(finales_parche)){
+  mapas[[i]] <- show_lsm(edo09ca, what = paste0(finales_parche[[i]]), directions = 4) #genera la métrica en formato de mapa ggplot 
+  spat_df[[i]] <- mapas[[i]]$layer_1$data  # Crear un "SpatialPointsDataFrame" a partir de la tabla de datos de cada objeto (mapa)
+  coordinates(spat_df[[i]]) <- ~x + y      # Asignar las columnas x, y como coordenadas que se usarán para crear el raster
+  rasters[[i]] <- rast(cbind(spat_df[[i]]@coords, spat_df[[i]]$value), type = "xyz", crs = "EPSG:32614") 
+  terra::writeRaster(rasters[[i]], 
+             filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/mapas_parche/parche_estado_2009_", finales_parche[[i]], ".tif"), 
+             filetype = "GTiff", overwrite = TRUE, NAflag = 0)
+}
+
+
+# #MÉTRICAS DE PARCHE FINALES PARA EL 2020
+
+plot(edo20)
+
+finales_parche <- list("lsm_p_area", "lsm_p_shape","lsm_p_circle", "lsm_p_ncore", "lsm_p_cai", "lsm_p_enn", "lsm_p_shape")
+mapas20 <- list()
+spat_df20 <- list()
+rasters20 <- list()
+
+# ESTADO ~ AÑO 2020
+for(i in 1:length(finales_parche)){
+  mapas20[[i]] <- show_lsm(edo20, what = paste0(finales_parche[[i]]), directions = 4) #genera la métrica en formato de mapa ggplot 
+  spat_df20[[i]] <- mapas20[[i]]$layer_1$data  # Crear un "SpatialPointsDataFrame" a partir de la tabla de datos de cada objeto (mapa)
+  coordinates(spat_df20[[i]]) <- ~x + y      # Asignar las columnas x, y como coordenadas que se usarán para crear el raster
+  rasters20[[i]] <- rast(cbind(spat_df20[[i]]@coords, spat_df20[[i]]$value), type = "xyz", crs = "EPSG:32614") 
+  terra::writeRaster(rasters20[[i]], 
+             filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/mapas_parche/parche_estado_2020_", finales_parche[[i]], ".tif"), 
+             filetype = "GTiff", overwrite = TRUE, NAflag = 0)
+}
+
+# Loop para ahorra espacio en memoria. NO CORRER SI YA SE CORRIÓ EL LOOP ANTERIOR
+for(i in 1:length(finales_parche)){
+  mapas20[[i]] <- show_lsm(edo20, what = paste0(finales_parche[[i]]), directions = 4)
+  spat_df20 <- mapas20[[i]]$layer_1$data  # Eliminar la lista, usar un objeto temporal
+  coordinates(spat_df20) <- ~x + y
+  rasters20 <- rast(cbind(spat_df20@coords, spat_df20$value), type = "xyz", crs = "EPSG:32614")
+  terra::writeRaster(rasters20, 
+             filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/mapas_parche/parche_estado_2020_", finales_parche[[i]], ".tif"), 
+             filetype = "GTiff", overwrite = TRUE, NAflag = 0)
+  rm(spat_df20, rasters20)  # Liberar memoria
+  gc()  # Solicitar la recolección de basura
+}
+
+```
+
+
+# CALCULANDO MÉTRICAS DE PARCHE EN LOOP
+Se calcularon las métricas en formato .csv
+
+```{r}
+
+#Primero tener preparados los siguientes objetoS (insumos) para cualquiera de los loop a correr
+nombres_09 #contiene la lista de nombres sin espacios ni guión bajo de las anps y cobiocom
+nombres_20
+
+recortes_09 #corresponden a los archivos tif recortados a la extensión de las anps y cobiocom de ambos tiempos
+recortes_20
+
+#LOOP PARA MÉTRICAS DE PARCHE- AÑO 2009
+
+metricas09_patch <- list()
+
+for(i in 1:length(recortes_09)){
+  # Usar tryCatch para manejar errores
+  metricas09_patch[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result09_patch <- calculate_lsm(recortes_09[[i]], level = "patch", full_name = TRUE, progress = TRUE) %>% 
+      as.data.frame() 
+    
+    result09_patch <- left_join(result09_patch, id_edo09, by = "class") #Asigna el tipo de cubierta de acuerdo al id de la columna class que va del 0 al 19
+    
+    # Guardar el resultado en la lista
+    result09_patch
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+#revisar outputs antes de exportar
+# Exportar cada elemento de metricas a un archivo Excel de acuerdo con el nombre del raster almacenado en el objeto nombres_anps. Solo exportará los elementos que no son nulos, es decir los paisajes en los que pudo generar las métricas correctamente
+
+for(i in 1:length(metricas09_patch)) {
+  if(!is.null(metricas09_patch[[i]])) {
+    export(metricas09_patch[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2009//parche_", nombres_09[i], ".csv"))
+  }
+}
+
+#LOOP PARA MÉTRICAS DE PARCHE- AÑO 2020
+
+metricas20_patch <- list()
+
+for(i in 1:length(recortes_20)){
+  # Usar tryCatch para manejar errores
+  metricas20_patch[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result20_patch <- calculate_lsm(recortes_20[[i]], level = "patch", full_name = TRUE, progress = TRUE) %>% 
+      as.data.frame() 
+    
+    result20_patch <- left_join(result20_patch, id_edo09, by = "class") #Asigna el tipo de cubierta de acuerdo al id de la columna class que va del 1 al 20
+    
+    # Guardar el resultado en la lista
+    result20_patch
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+for(i in 1:length(metricas20_patch)) {
+  if(!is.null(metricas20_patch[[i]])) {
+    export(metricas20_patch[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2020//parche_", nombres_20[i], ".csv"))
+  }
+}
+
+
+#ESTADO   
+edo_parche09 <- calculate_lsm(edo09ca, level = "patch", full_name = TRUE) %>% as.data.frame() %>% left_join(., id_edo09, by = "class") #correr y revisar antes de exportar 
+
+  export(edo_parche09, file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2009//parche_estado_2009.csv")
+
+edo_parche20 <- calculate_lsm(edo20, level = "patch", full_name = TRUE) %>% as.data.frame() %>% left_join(., id_edo20, by = "class")
+
+  export(edo_parche20, file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2020//parche_estado_2020.csv")
+  
+
+```
+
+##CALCULO DE MÉTRICAS DE CLASE EN LOOP 
+##Código sugerido por chat gpt 
+Se usa la función tryCatch paa saltar el error y seguir con el siguiente elemento de la lista para después poder exportar solo los elementos que no tienen valores nulos.
+```{r}
+
+#se hacen por separado porque el id de los raster del año 2009 no son iguales los de 2020
+#entonces, desde el loop para exportar asignarles los ID's que corresponden a su tipo de cubierta
+
+#LOOP:
+# Crear una lista vacía para almacenar las métricas
+metricas09 <- list()
+result09 <- list()
+
+# Bucle para calcular las métricas de cada raster en anps_rasters_09
+for(i in 1:length(recortes_09)){
+  # Usar tryCatch para manejar errores
+  metricas09[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result09 <- calculate_lsm(recortes_09[[i]], level = "class", full_name = TRUE, progress = TRUE) %>%      as.data.frame()
+    
+    result09 <- left_join(result09, id_edo09, by = "class")
+    
+    # Guardar el resultado en la lista
+    result09
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+# Exportar cada elemento de metricas a un archivo Excel de acuerdo con el nombre del raster almacenado en el objeto nombres_anps. Solo exportará los elementos que no son nulos, es decir los paisajes en los que pudo generar las métricas correctamente
+
+for(i in 1:length(metricas09)) {
+  if(!is.null(metricas09[[i]])) {
+    export(metricas09[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2009//clase_", nombres_09[i], ".csv"))
+  }
+}
+
+# AHORA PARA EL TIEMPO 2020
+
+metricas20 <- list()
+result20 <- list()
+
+for(i in 1:length(recortes_20)){
+  # Usar tryCatch para manejar errores
+  metricas20[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result20 <- calculate_lsm(recortes_20[[i]], level = "class", full_name = TRUE, progress = TRUE) %>%
+      as.data.frame() 
+    
+    result20 <- left_join(result20, id_edo20, by = "class")
+    
+    # Guardar el resultado en la lista
+    result20
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+for(i in 1:length(metricas20)) {
+  if(!is.null(metricas20[[i]])) {
+    export(metricas20[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2020//clase_", nombres_20[i], ".csv"))
+  }
+}
+
+# ESTADO
+
+edo_clase09 <- calculate_lsm(edo09ca, level = "class", full_name = TRUE) %>% as.data.frame() %>%
+       left_join(., id_edo09, by = "class") 
+
+  export(edo_clase09, file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2009//clase_estado_2009.csv")
+
+edo_clase20 <- calculate_lsm(edo20, level = "class", full_name = TRUE) %>% as.data.frame() %>%
+       left_join(., id_edo20, by = "class") 
+
+  export(edo_clase20, file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2020//clase_estado_2020.csv")
+
+```
+## CALCULANDO MÉTRICAS DE PAISAJE EN LOOP 
+Para las métricas de paisaje no es necesario hacer el paso del left_join porque ya no hay que asignar el id del tipo de cubierta ni el pivot_wider porque la tabla es en formato largo.
+```{r}
+#antes los hice por separado porque el id de los raster del año 2009 no son iguales que los de 2020
+#ACTUALIZACIÓN (22-AGO-24): ya son iguales para ambos tiempos
+#entonces, desde el loop para exportar asignarles los ID's que corresponden a su tipo de cubierta
+
+#LOOP:
+# Crear una lista vacía para almacenar las métricas
+metricas09_land <- list()
+
+# Bucle para calcular las métricas de cada raster en anps_rasters_09
+for(i in 1:length(recortes_09)){
+  # Usar tryCatch para manejar errores
+  metricas09_land[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result09_land <- calculate_lsm(recortes_09[[i]], level = "landscape", full_name = TRUE, progress = TRUE) %>%
+      as.data.frame()
+    
+    # Guardar el resultado en la lista
+    result09_land
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+# Exportar cada elemento de metricas a un archivo Excel de acuerdo con el nombre del raster almacenado en el objeto nombres_anps. Solo exportará los elementos que no son nulos, es decir los paisajes en los que pudo generar las métricas correctamente
+
+for(i in 1:length(metricas09_land)) {
+  if(!is.null(metricas09_land[[i]])) {
+    export(metricas09_land[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2009//paisaje_", nombres_09[i], ".csv"))
+  }
+}
+
+# AHORA PARA EL TIEMPO 2020
+metricas20_land <- list()
+
+# Bucle para calcular las métricas de cada raster en anps_rasters_09
+for(i in 1:length(recortes_20)){
+  # Usar tryCatch para manejar errores
+  metricas20_land[[i]] <- tryCatch({
+    # Intentar calcular las métricas
+    result20_land <- calculate_lsm(recortes_20[[i]], level = "landscape", full_name = TRUE, progress = TRUE) %>%
+      as.data.frame()
+    
+    # Guardar el resultado en la lista
+    result20_land
+  }, error = function(e) {
+    # Manejar el error y continuar con el siguiente elemento
+    message(paste("Error con el elemento", i, ":", e$message))
+    NULL  # Devolver NULL en caso de error
+  })
+}
+
+# Exportar cada elemento de metricas a un archivo Excel de acuerdo con el nombre del raster almacenado en el objeto nombres_anps. Solo exportará los elementos que no son nulos, es decir los paisajes en los que pudo generar las métricas correctamente
+
+for(i in 1:length(metricas20_land)) {
+  if(!is.null(metricas20_land[[i]])) {
+    export(metricas20_land[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//2020//paisaje_",nombres_20[i], ".csv"))
+  }
+}
+
+
+#ESTADO
+edo_paisaje09 <- calculate_lsm(edo09ca, level = "landscape", full_name = TRUE) %>% as.data.frame() %>% 
+export(., file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2009//paisaje_estado_2009.csv")
+
+
+edo_paisaje20 <- calculate_lsm(edo20, level = "landscape", full_name = TRUE) %>% as.data.frame() %>% export(., file= "D://mapas_gto//UTM//conectividad_estructural//resultados//2020//paisaje_estado_2020.csv")
+```
+
+
+#CORRELACIÓN ENTRE MÉTRICAS (PEARSON)
+Se calculó la correlación entre las métricas con método de correlación de Pearson para métricas de parche, clase y paisaje
+```{r}
+
+#Correlación entre métricas de parche Edo 2020 ## ME QUEDÉ AQUÍ 09/09/2024 volver a hacer para 2020, el código está en ConectividadEstructural.Rmd para el año 2018 y los gráficos están para año 2018. Rehacer si es necesario y además me faltó hacer la correlación para las métricas de paisaje
+
+corr_edo09 <- calculate_correlation(edo_parche09, method = "pearson") %>% print() #debe usarse el output original de fragstat
+
+corr_class_edo09 <- corr_edo09 %>% as.data.frame()  %>% filter(., value >= 0.8 | value <= -0.8) %>% print()
+
+
+```
+
+```
+
+
+
+#ANÁLISIS DE CAMBIO DE LAS MÉTRICAS DE CLASE
+Una vez generadas las métricas leer los archivos .csv de la carpeta resultados, después unir las tablas con los valores por métrica y tipo de cubierta. Finalmente se exporta la tabla con la información de la diferencia de los valores correspondientes al año 2020 menos 2009.
+```{r}
+##ESTADO
+
+#leyendo los archivos
+clase_edo09 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/clase_estado_2009.csv") %>% mutate(across(-c(class,categoria), as.numeric)) %>% pivot_longer(cols = -c(class,categoria), names_to = "metric", values_to = "value2009") %>% select(metric, value2009, categoria) %>% rename(valor2009 = value2009, metrica= metric, cubierta = categoria)
+
+clase_edo20 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/clase_estado_2020.csv") %>% mutate(across(-c(class,categoria), as.numeric)) %>% pivot_longer(cols = -c(class,categoria), names_to = "metric", values_to = "value2020") %>% select(metric, value2020, categoria) %>% rename(valor2020 = value2020, metrica= metric, cubierta = categoria)
+
+##NOTA: Este paso ya no es necesario porque se modificaron los insumos desde el inicio. Los raster homogeneizados en categorías son eedo09ca (usv_2009_newCA.tif) y edo20 (usvedo_2020_reclas.tif)
+
+#homogeneizando caracteres en los tipos de cubierta para que sean las mismas categorías en ambos df
+#unique(clase_edo20$cubierta)
+#unique(clase_edo09$cubierta)
+  # Categorías que están en clase_edo20 pero no en clase_edo09
+#diferencias_20_vs_09 <- setdiff(unique(clase_edo20$cubierta), unique(clase_edo09$cubierta))
+# Categorías que están en clase_edo09 pero no en clase_edo20
+#diferencias_09_vs_20 <- setdiff(unique(clase_edo09$cubierta), unique(clase_edo20$cubierta))
+
+#clase_edo20$cubierta <- gsub("Asentamientos Humanos","Asentamiento humano",  clase_edo20$cubierta)
+#clase_edo20$cubierta <- gsub("Bosque de Pino","Bosque de pino",  clase_edo20$cubierta)
+#clase_edo20$cubierta <- gsub("Cuerpo de Agua","Cuerpo de agua",  clase_edo20$cubierta
+
+
+
+##############################################################################################3
+#   ANÁLISIS DE CAMBIO - ESTADO   #
+#                       #
+
+
+#generando el data frame con los valores de todas las métricas con una columna para 2009 y otra para 2020
+joined_clase_edo <- clase_edo09 %>% inner_join(clase_edo20, by= join_by(metrica, cubierta))
+
+
+####  Obteniendo la diferencia(ganancia o pérdida) para cada métrica y clase evaluada restando el valor del 2009 al de 2020  ####
+
+cambio_clase_edo <- joined_clase_edo %>% mutate(diferencia= valor2020-valor2009) %>% mutate(cambio = ifelse(diferencia >= 0, "ganancia", "perdida")) %>% select(cubierta, metrica, valor2009, valor2020, diferencia, cambio) #%>%  mutate(tipo_metrica = tipo) 
+
+write.csv(cambio_clase_edo,   file="D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/clase_cambio_estado.csv")
+
+
+## COBIOCOM
+
+#leyendo los archivos
+clase_cobiocom09 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/clase_cobiocom_2009.csv") %>% mutate(across(-c(class,categoria), as.numeric)) %>% pivot_longer(cols = -c(class,categoria), names_to = "metric", values_to = "value2009") %>% select(metric, value2009, categoria) %>% rename(valor2009 = value2009, metrica= metric, cubierta = categoria)
+
+clase_cobiocom20 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/clase_cobiocom_2020.csv") %>% mutate(across(-c(class,categoria), as.numeric)) %>% pivot_longer(cols = -c(class,categoria), names_to = "metric", values_to = "value2020") %>% select(metric, value2020, categoria) %>% rename(valor2020 = value2020, metrica= metric, cubierta = categoria)
+
+
+#generando el data frame con los valores de todas las métricas con una columna para 2009 y otra para 2020
+joined_clase_cobiocom <- clase_cobiocom09 %>% inner_join(clase_cobiocom20, by= join_by(metrica, cubierta))
+
+#Obteniendo la diferencia(ganancia o pérdida) para cada métrica y clase evaluada restando el valor del 2009 al de 2020
+
+cambio_clase_cobiocom <- joined_clase_cobiocom %>% mutate(diferencia= valor2020-valor2009) %>% mutate(cambio = ifelse(diferencia >= 0, "ganancia", "perdida")) %>% select(cubierta, metrica, valor2009, valor2020, diferencia, cambio) #%>%  mutate(tipo_metrica = tipo) 
+
+write.csv(cambio_clase_cobiocom,   file="D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/clase_cambio_cobiocom.csv")
+
+
+### ANPS
+
+### PENDIENTE: Modificar esta función para leer solo las anps.
+files_csv <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/", pattern = "*.csv$",
+                    full.names = T)
+
+list_clase_edo <- files_csv[str_detect(files_csv, "todas_clase_edo")] %>% lapply(., read.csv)
+ clase_edo09 <- as.data.frame(list_clase_edo[[1]]) 
+
+```
+
+
+###GRAFICANDO RESULTADOS DE ANÁLISIS DE CAMBIO (CLASE) PARA EL ESTADO Y COBIOCOM
+Aquí se grafican las diferencias del año 2009 al 2020 para las métricas a nivel de clase y a las dos escalas.
+Primero agregar una columna nueva indicando la escala para después usarla como ´fill´ dentro del plot.Se realizan plots separados por tipo de métrica, considerando que hay 3 tipos.
+```{r}
+
+unique(cambio_clase_edo$metrica)
+
+#Abreviación de todas las métricas que calcula la paquetería
+landscapemetrics::lsm_abbreviations_names
+
+#gráficos solo con las métricas finales de clase propuestas:
+#Filtrando el subset de datos
+analisis_cambio <- cambio_clase_edo %>% select(cubierta, metrica, diferencia, cambio) %>% filter(metrica %in% c("core_cv", "pland", "lpi", "ed", "cpland", "dcad", "clumpy", "lsi", "nlsi", "cohesion", "pd", "division" )) %>% mutate(escala="ESTADO")
+
+analisis_cambio_cbcm <- cambio_clase_cobiocom %>% select(cubierta, metrica, diferencia, cambio) %>% filter(metrica %in% c("core_cv", "pland", "lpi", "ed", "cpland", "dcad", "clumpy", "lsi", "nlsi", "cohesion", "pd", "division" )) %>% mutate(escala="COBIOCOM")
+
+#Uniendo los datos de las dos escalas en el mismo  
+
+cambio_combinadas <- rbind(analisis_cambio, analisis_cambio_cbcm) #pegar filas abajo
+
+###TABLA MADRE !!!
+#Contiene los valores de todas las métricas para el año 2009 y 2020 ,
+#la columna de diferencia entre ambos tiempos para cada métrica y
+#la escala (EDO Y COBIOCOM) 
+#Hice esta para para exportar y modificar
+tabla_madre <- rbind(cambio_clase_edo %>% mutate(escala="ESTADO"), cambio_clase_cobiocom %>% mutate(escala="COBIOCOM")) 
+
+write.csv(tabla_madre, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_todas_clase_edovscobiocom.csv")
+
+
+###Tabla para generar los gráficos
+cambio_combinadas <- read_csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_todas_clase_edovscobiocom.csv")
+
+#paqueterías para graficar
+library(pacman)
+p_load(ggridges, ggplot2, viridis, hrbrthemes)
+
+#definir colores y niveles para los gráficos
+colores <- c("ESTADO" = "#CD8162", "COBIOCOM" = "#698B69")
+etiquetas <- c("ESTADO" = "ESTADO", "COBIOCOM" = "COBIOCOM")
+cambio_combinadas$escala <- factor(cambio_combinadas$escala, levels = c("ESTADO", "COBIOCOM"))  
+
+ 
+ ### ESTA ES LA BUENA, ÉXITO!!!! 
+#solo revisar que los valores que está graficando sean correctos
+ #par(mar=c(6,4,4,4))
+ 
+orden_cubierta <- c("Asentamiento humano",
+                    "Agricultura de riego (incluye riego eventual)",
+                    "Agricultura de temporal",
+                    "Pastizal inducido",
+                    "Pastizal natural (incluye pastizal - huizachal)",
+                    "Cuerpo de agua",
+                    "Área sin vegetación aparente",
+                    "Bosque de encino",                               
+                    "Bosque de oyamel (incluye ayarín y cedro)",      
+                    "Bosque de pino",                                
+                    "Bosque de pino-encino (incluye encino-pino)",    
+                    "Bosque de táscate",                             
+                    "Chaparral",                                      
+                    "Matorral crasicaule",                            
+                    "Matorral submontano",                            
+                    "Matorral subtropical",                           
+                    "Mezquital (incluye huizachal)",                  
+                    "Popal - Tular",                                  
+                    "Selva baja caducifolia y subcaducifolia",        
+                    "Vegetación halófila y gipsófila")                           
+
+
+#LOOP PARA GENERAR LOS GRÁFICOS POR CADA MÉTRICA
+ 
+metricas_unidades <- data.frame(
+  metrica = c("core_cv", "pland", "lpi", "ed", "cpland", "dcad", "clumpy", "lsi", "nlsi", "cohesion", "pd", "division"),
+  unidades = c("Hectáreas CORE >= 0, sin límite", "Porcentaje 0 < PLAND <= 100", "Porcentaje 0 < LPI <= 100", 
+               "Metros ED >= 0, sin límite", "Porcentaje 0 < CPLAND <= 100", "Valor propio de la métrica DCAD >= 0, sin límite", 
+               "Porcentaje -1 <= CLUMPY <= 1", "Valor propio de la métrica LSI >= 1, sin límite", 
+               "Métrica normalizada 0 <= NLSI <= 1", "Porcentaje 0 < COHESIÓN < 100", 
+               "Unidades PD >= 0, sin límite", "Proporción 0 <= DIVISIÓN < 1"),
+  nombres_metricas = c("Coeficiente de variación de áreas núcleo (core_cv)", "Porcentaje del paisaje (pland)", "Índice del parche más largo (lpi)", "Densidad de borde (ed)", "Porcentaje del paisaje de áreas núcleo (cpland)", "Densidad de áreas núcleo disyuntas (dcad)", "Índice de aglomeración (clumpy)", "Índice de forma del paisaje (lsi)", "Índice de forma del paisaje normalizado (nlsi)", "Índice de cohesión del parche (cohesion)", "Densidad de parche (pd)", "Índice de división (division)")
+)
+
+# Itera sobre cada métrica para crear los gráficos
+plot_list <- list()  # Inicializa una lista para guardar los gráficos
+
+metricas_finales <- metricas_unidades$metrica
+unidades <- metricas_unidades$unidades
+nombres_metricas <- metricas_unidades$nombres_metricas
+
+for (i in seq_along(metricas_finales)) {
+  tryCatch({
+    graf <- cambio_combinadas %>%
+      filter(metrica == metricas_finales[i]) %>%
+      mutate(cubierta = factor(cubierta, levels = orden_cubierta)) %>%
+      ggplot(aes(x = cubierta, y = diferencia, fill = escala)) +
+      geom_bar(stat = "identity", alpha = 0.6, width = 0.7, position = position_dodge(width = 0.5)) +  # Ancho de barras ajustado
+      geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+      coord_flip() +
+      xlab("Tipo de cubierta") +
+      ylab("Diferencia del año 2009 a 2020") +
+      ggtitle(paste0("Cambio en métrica de clase: ", nombres_metricas[i])) +
+      labs(subtitle = paste0("Unidades de la métrica: ",unidades[i]), fill = "Cambio") +
+      theme_bw() +
+      scale_fill_manual(values = colores, labels = etiquetas) +
+      guides(fill = guide_legend(title = "Escala")) +
+      theme(
+        plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),
+        plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),
+        plot.margin = margin(t = 10, r = 5, b = 5, l = 5)
+      )
+    plot_list[[i]] <- graf         
+    #print(plot_list[[i]])
+    
+    ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_clase_", metricas_finales[i], ".png"), 
+           plot = graf, width = 10, height = 8, dpi = 300)
+  }, error = function(e) {
+    message("Error en la iteración ", i, ": ", e)
+  })
+}
+
+
+
+
+# Si quieres ver uno de los gráficos, por ejemplo para 'CORE':
+print(plot_list$core_cv)
+
+subset <- filter(cambio_combinadas, metrica == "core_cv")
+
+plot_list <- cambio_combinadas %>%
+  filter(.,metrica == "core_cv") %>% 
+   mutate(cubierta = factor(cubierta, levels = orden_cubierta)) %>% 
+  ggplot(aes(x = cubierta, y = diferencia, fill = escala)) +
+  geom_bar(stat = "identity", alpha = 0.6, width = 0.4, position = position_dodge(width = 0.5)) +
+   geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+  coord_flip() +
+  xlab("Tipo de cubierta") +
+  ylab("Diferencia del año 2009 a 2020") +
+  ggtitle("Análisis de cambio a nivel clase") +
+  theme_bw() +
+  #facet_wrap(~ metrica, scales = "free_x") +
+  scale_fill_manual(values = colores, labels = etiquetas) +
+  labs(fill = "Cambio") +
+  guides(fill = guide_legend(title = "Cambio"))
+
+print(plot_list)
+
+
+ #exportando el plot
+ ggsave("D:/mapas_gto/UTM/conectividad_estructural/resultados/cambio_clase_agregacion.png", plot = plot_agregacion, width = 10, height = 8, dpi = 300)
+ 
+ 
+
+
+# PENDIENTE 
+#Pensar en un código que haga un solo plot de barras con comparación de Edo y cobiocom uno al lado de otro para el mismo tipo de cubierta- similar a esto https://r-graph-gallery.com/37-barplot-with-number-of-observation.html
+
+```
+
+### CAMBIO DE LAS MÉTRICAS DE CLASE A TODAS LAS ESCALAS: ANP'S, COBIOCOM Y ESTADO
+```{r}
+# MÉTRICAS DE CLASE (TODAS) A TODAS LAS ESCALAS PARA EL 2009 y 2020 en listas separadas 
+files_csv09 <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/", pattern = "*.csv$",
+                    full.names = T)
+                    
+files_csv20 <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/", pattern = "*.csv$",
+                    full.names = T)
+                    
+#nombres de los archivos (contiene el nombre de c/ANP)                   
+
+nombres_csv <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/", pattern = "*.csv$",
+                    full.names = F) %>% 
+  .[str_detect(., "clase")] %>% 
+  str_remove_all("_2009\\.csv|clase_")  # Remueve "_2009.csv" y "clase" para conservar solo el nombre de las ANP's
+                    
+
+
+#Leyendo los csv de todas las escalas con las métricas de clase para 2009:
+
+csv_09_class <- files_csv09 %>% .[str_detect(., "clase")] %>%
+              lapply(.,read.csv) %>% lapply(.,select, metric, value, name, type, categoria) #también seleccionar la columna 'categoria' con los tipos de vegetación 
+              
+csv_20_class <- files_csv20 %>% .[str_detect(., "clase")] %>%
+              lapply(.,read.csv) %>% lapply(.,select, metric, value, name, type, categoria) 
+              
+
+#Una vez en la lista, agregar el nombre del ANP  a una nueva columna llamada escala
+
+csv_09new_c <- Map(function(df, nombre) {
+  mutate(df, scale = nombre)  # Añade la nueva columna 'scale' con el valor de 'nombre'
+}, csv_09_class, nombres_csv)
+
+csv_20new_c <- Map(function(df, nombre) {
+  mutate(df, scale = nombre)  # Añade la nueva columna 'scale' con el valor de 'nombre'
+}, csv_20_class, nombres_csv)
+
+
+##Uniendo todos los data frames en uno para el año 2009 - pega todas las filas
+
+csv_joined09_c <- do.call(rbind, csv_09new_c)
+
+csv_joined20_c <- do.call(rbind, csv_20new_c)
+
+# Unión de ambos df para que tener la columna valor (de cada métrica) para 2009 y 2020
+### TABLA MADRE SUPREMA (CLASE) con las diferencias entre métricas de 2009 a 2020!!!!! 
+
+tm_suprema_clase <- full_join(csv_joined09_c, csv_joined20_c, by = join_by(metric, name, type, scale, categoria)) %>% rename(value2009 = value.x, value2020 = value.y) %>% mutate(diferencia = value2020-value2009) %>% 
+  select(metric, categoria, value2009, value2020, diferencia, scale, everything())
+
+###Guardar la tabla con todas las métricas de clase a todas las escalas
+# a partir de esta tabla se pueden filtrar las  métricas finales para generar los gráficos
+write.csv(tm_suprema_clase, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_clase_todas_escalas.csv")
+
+```
+
+########### GRÁFICOS DE CLASE FINALES A TODAS LAS ESCALAS ################
+
+```{r}
+
+# Cargar las bibliotecas necesarias
+library(ggplot2)
+library(dplyr)
+
+#Filtrar solo las métricas finales a partir de la tabla suprema de clase
+df <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_clase_todas_escalas.csv") %>% filter(metric %in% c("core cv","pland", "lpi", "ed", "cpland", "dcad", "clumpy", "lsi", "nlsi", "cohesion", "pd", "division"))  #WARNING!! aquí métricas como "core cv" tienen espacio en lugar de guión bajo
+
+
+df_grouped <- df %>%
+  mutate(categoria_agrupada = case_when(
+    scale == "COBIOCOM" ~ "COBIOCOM",
+    scale == "Estado" ~ "Estado",
+    TRUE ~ "ANPs"
+  )) %>%
+  group_by(categoria_agrupada, metric, categoria) %>%
+  summarise(
+    value2009_mean = mean(value2009, na.rm = TRUE),
+    value2009_sd = sd(value2009, na.rm = TRUE),
+    value2020_mean = mean(value2020, na.rm = TRUE),
+    value2020_sd = sd(value2020, na.rm = TRUE),
+    diferencia_mean = mean(diferencia, na.rm = TRUE),
+    diferencia_sd = sd(diferencia, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+head(df_grouped)
+
+unique(df_grouped$metric)
+# Calculamos la diferencia entre 2020 y 2009
+df_grouped <- df_grouped %>%
+  mutate(diferencia = value2020_mean - value2009_mean)
+  
+#LOOP PARA GENERAR LOS GRÁFICOS POR CADA MÉTRICA
+ 
+metricas_unidades <- data.frame(
+  metrica = c("core cv", "pland", "lpi", "ed", "cpland", "dcad", "clumpy", "lsi", "nlsi", "cohesion", "pd", "division"),
+  unidades = c("Hectáreas CORE >= 0, sin límite", "Porcentaje 0 < PLAND <= 100", "Porcentaje 0 < LPI <= 100", 
+               "Metros ED >= 0, sin límite", "Porcentaje 0 < CPLAND <= 100", "Valor propio de la métrica DCAD >= 0, sin límite", 
+               "Porcentaje -1 <= CLUMPY <= 1", "Valor propio de la métrica LSI >= 1, sin límite", 
+               "Métrica normalizada 0 <= NLSI <= 1", "Porcentaje 0 < COHESIÓN < 100", 
+               "Unidades PD >= 0, sin límite", "Proporción 0 <= DIVISIÓN < 1"),
+  nombres_metricas = c("Coeficiente de variación de áreas núcleo (core_cv)", "Porcentaje del paisaje (pland)", "Índice del parche más largo (lpi)", "Densidad de borde (ed)", "Porcentaje del paisaje de áreas núcleo (cpland)", "Densidad de áreas núcleo disyuntas (dcad)", "Índice de aglomeración (clumpy)", "Índice de forma del paisaje (lsi)", "Índice de forma del paisaje normalizado (nlsi)", "Índice de cohesión del parche (cohesion)", "Densidad de parche (pd)", "Índice de división (division)")
+)
+
+orden_cubierta <- c("Asentamiento humano",
+                    "Agricultura de riego (incluye riego eventual)",
+                    "Agricultura de temporal",
+                    "Pastizal inducido",
+                    "Pastizal natural (incluye pastizal - huizachal)",
+                    "Cuerpo de agua",
+                    "Área sin vegetación aparente",
+                    "Bosque de encino",                               
+                    "Bosque de oyamel (incluye ayarín y cedro)",      
+                    "Bosque de pino",                                
+                    "Bosque de pino-encino (incluye encino-pino)",    
+                    "Bosque de táscate",                             
+                    "Chaparral",                                      
+                    "Matorral crasicaule",                            
+                    "Matorral submontano",                            
+                    "Matorral subtropical",                           
+                    "Mezquital (incluye huizachal)",                  
+                    "Popal - Tular",                                  
+                    "Selva baja caducifolia y subcaducifolia",        
+                    "Vegetación halófila y gipsófila")                           
+
+
+library(ggplot2)
+library(dplyr)
+
+
+# Modificar el código para ajustar márgenes y expandir el área del gráfico
+plot_list <- list()
+
+# Recorremos las métricas con sus unidades
+for (i in seq_along(unique(df_grouped$metric))) {
+  metrica_actual <- unique(df_grouped$metric)[i]
+  unidad_actual <- metricas_unidades %>% 
+    filter(metrica == metrica_actual) %>% 
+    pull(unidades)
+  
+  graf <- df_grouped %>%
+    filter(metric == metrica_actual) %>%
+    mutate(categoria = factor(categoria, levels = orden_cubierta)) %>%  # Ordenar la categoría
+    ggplot(aes(x = categoria, y = value2020_mean - value2009_mean, fill = categoria_agrupada)) +
+    geom_bar(stat = "identity", alpha = 0.6, width = 0.7, position = position_dodge(width = 0.8)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +  # Añadimos la línea horizontal
+    scale_fill_manual(values = c("ANPs" = "#838B8B", "COBIOCOM" = "#66CDAA", "Estado" = "darkorange3")) +
+    xlab("Tipo de cubierta") +
+    ylab("Diferencia del valor promedio 2020 - 2009") +
+    ggtitle(paste0("Cambio en métrica de clase: ", metrica_actual)) +
+    labs(subtitle = paste0("Unidades: ", unidad_actual), fill = "Escala espacial") +
+    theme_bw() +
+    theme(
+      panel.grid.major.x = element_blank(),         # Eliminamos las líneas verticales
+      panel.grid.minor.x = element_blank(),
+      panel.grid.major.y = element_line(color = "grey"),  # Mostramos solo las líneas horizontales
+      panel.grid.minor.y = element_blank(),
+      plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),
+      axis.text.x = element_text(angle = 60, hjust = 1),  # Rótulos en diagonal
+      plot.margin = margin(t = 10, r = 10, b = 10, l = 12)  # Aumentar márgenes
+    ) +
+    scale_x_discrete(expand = expansion(mult = c(0.03, 0.03))) +  # Expansión del área en el eje x
+    geom_vline(xintercept = seq(1.5, length(orden_cubierta), by = 1), color = "gray", linetype = "dotted")  # Separador entre cubiertas
+  
+  plot_list[[i]] <- graf
+}
+
+# Mostrar uno de los gráficos como ejemplo
+print(plot_list[[12]])
+
+
+##Guardar los gráficos
+
+# Definir las métricas que usaremos para nombrar los archivos
+metricas <- unique(df_grouped$metric)
+
+for (i in seq_along(metricas)) {
+  ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_clase_escalas_", metricas[i], ".png"), plot = plot_list[[i]], width = 12, height = 6, dpi = 300)
+}
+
+
+####Ejes invertidos
+
+plot_list <- list()
+# Recorremos las métricas con sus unidades
+for (i in seq_along(unique(df_grouped$metric))) {
+  metrica_actual <- unique(df_grouped$metric)[i]
+  unidad_actual <- metricas_unidades %>% 
+    filter(metrica == metrica_actual) %>% 
+    pull(unidades)
+  
+  graf <- df_grouped %>%
+    filter(metric == metrica_actual) %>%
+    mutate(categoria = factor(categoria, levels = orden_cubierta)) %>%  # Ordenar la categoría
+    ggplot(aes(y = categoria, x = value2020_mean - value2009_mean, fill = categoria_agrupada)) +  # Invertir x e y
+    geom_bar(stat = "identity", alpha = 0.6, width = 0.7, position = position_dodge(width = 0.8)) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "red") +  # Cambiar la línea a vertical
+    scale_fill_manual(values = c("ANPs" = "#838B8B", "COBIOCOM" = "#66CDAA", "Estado" = "darkorange3")) +
+    ylab("Tipo de cubierta") +  # Etiqueta del eje y
+    xlab("Diferencia del valor promedio 2020 - 2009") +  # Etiqueta del eje x
+    ggtitle(paste0("Cambio en métrica de clase: ", metrica_actual)) +
+    labs(subtitle = paste0("Unidades: ", unidad_actual), fill = "Escala espacial") +
+    theme_bw() +
+    theme(
+      panel.grid.major.y = element_blank(),         # Eliminamos las líneas horizontales
+      panel.grid.minor.y = element_blank(),
+      panel.grid.major.x = element_line(color = "grey"),  # Mostramos solo las líneas verticales
+      panel.grid.minor.x = element_blank(),
+      plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),
+      axis.text.y = element_text(angle = 0, hjust = 1),  # Rotación de las etiquetas en el eje y
+      plot.margin = margin(t = 10, r = 10, b = 10, l = 12)  # Aumentar márgenes
+    ) +
+    scale_y_discrete(expand = expansion(mult = c(0.03, 0.03))) +  # Expansión del área en el eje y
+    geom_hline(yintercept = seq(1.5, length(orden_cubierta), by = 1), color = "gray", linetype = "dotted")  # Separador entre cubiertas
+  
+  plot_list[[i]] <- graf
+}
+
+plot_list[[12]]
+
+#Exportar
+metricas <- unique(df_grouped$metric)
+
+for (i in seq_along(metricas)) {
+  ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_clase_escalas_flip_", metricas[i], ".png"), plot = plot_list[[i]], width = 10, height = 8, dpi = 300)
+}
+
+```
+
+
+
+### ANÁLISIS DE CAMBIO DE LAS MÉTRICAS DE PAISAJE
+```{r}
+
+#ESTADO
+paisaje_edo09 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/paisaje_estado_2009.csv") %>%select(metric, value, type) %>% rename(valor2009 = value, metrica= metric)
+
+paisaje_edo20 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/paisaje_estado_2020.csv") %>%   select(metric, value) %>% rename(valor2020 = value, metrica= metric)
+
+#generando el data frame con los valores de todas las métricas con una columna para 2009 y otra para 2020
+joined_paisaje_edo <- paisaje_edo09 %>% inner_join(paisaje_edo20, by= join_by(metrica))
+
+#Obteniendo la diferencia(ganancia o pérdida) para cada métrica y clase evaluada restando el valor del 2009 al de 2020
+
+cambio_paisaje_edo <- joined_paisaje_edo %>% mutate(diferencia= valor2020-valor2009) %>% mutate(cambio = ifelse(diferencia >= 0, "ganancia", "perdida")) %>%  mutate(tipo_metrica = type) %>% select(metrica, valor2009, valor2020, diferencia, cambio, tipo_metrica)  
+
+write.csv(cambio_paisaje_edo,   file="D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/paisaje_cambio_estado.csv")
+
+#COBIOCOM
+paisaje_cobiocom09 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/paisaje_cobiocom_2009.csv") %>% select(metric, value, type) %>% rename(valor2009 = value, metrica= metric)
+
+paisaje_cobiocom20 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/paisaje_cobiocom_2020.csv") %>% select(metric, value) %>% rename(valor2020 = value, metrica= metric)
+
+#generando el data frame con los valores de todas las métricas con una columna para 2009 y otra para 2020
+joined_paisaje_cobiocom <- paisaje_cobiocom09 %>% inner_join(paisaje_cobiocom20, by= join_by(metrica))
+
+#Obteniendo la diferencia(ganancia o pérdida) para cada métrica y clase evaluada restando el valor del 2009 al de 2020
+
+cambio_paisaje_cobiocom <- joined_paisaje_cobiocom %>% mutate(diferencia= valor2020-valor2009) %>% mutate(cambio = ifelse(diferencia >= 0, "ganancia", "perdida")) %>%  mutate(tipo_metrica = type) %>% select(metrica, tipo_metrica, valor2009, valor2020, diferencia, cambio) 
+
+write.csv(cambio_paisaje_cobiocom,   file="D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/paisaje_cambio_cobiocom.csv")
+
+
+```
+
+
+######### CAMBIO EN MÉTRICAS DE PAISAJE PARA TODAS LAS ESCALAS: ANP'S, ESTADO, COBIOCOM  ######
+```{r}
+# MÉTRICAS DE PAISAJE (TODAS) A TODAS LAS ESCALAS PARA EL 2009 y 2020 en listas separadas 
+files_csv09 <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/", pattern = "*.csv$",
+                    full.names = T)
+                    
+files_csv20 <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/", pattern = "*.csv$",
+                    full.names = T)
+                    
+#nombres de los archivos (contiene el nombre de c/ANP)                   
+
+nombres_csv <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/", pattern = "*.csv$",
+                    full.names = F) %>% 
+  .[str_detect(., "paisaje")] %>% 
+  str_remove_all("_2009\\.csv|paisaje_")  # Remueve "_2009.csv" y "_2020.csv"
+                    
+
+
+#Leyendo los csv de todas las escalas con las métricas de paisaje para 2009:
+csv_09 <- files_csv09 %>% .[str_detect(., "paisaje")] %>%
+              lapply(.,read.csv) %>% lapply(.,select, metric, value, name, type)
+              
+csv_20 <- files_csv20 %>% .[str_detect(., "paisaje")] %>%
+              lapply(.,read.csv) %>% lapply(.,select, metric, value, name, type)
+              
+
+#Una vez en la lista, agregar el nombre del ANP a una nueva columna llamada escala
+
+csv_09new <- Map(function(df, nombre) {
+  mutate(df, scale = nombre)  # Añade la nueva columna 'escala' con el valor de 'nombre'
+}, csv_09, nombres_csv)
+
+csv_20new <- Map(function(df, nombre) {
+  mutate(df, scale = nombre)  # Añade la nueva columna 'escala' con el valor de 'nombre'
+}, csv_20, nombres_csv)
+
+
+##Uniendo todos los data frames en uno para el año 2009 - pega todas las filas
+
+csv_joined09 <- do.call(rbind, csv_09new)
+
+csv_joined20 <- do.call(rbind, csv_20new)
+
+# Unión de ambos df para que tener la columna valor (de cada métrica) para 2009 y 2020
+### TABLA MADRE SUPREMA (PAISAJE) con las diferencias entre métricas de 2009 a 2020!!!!! 
+
+tm_suprema_paisaje <- full_join(csv_joined09, csv_joined20, by = join_by(metric, name, type, scale)) %>% rename(value2009 = value.x, value2020 = value.y) %>% mutate(diferencia = value2020-value2009) %>% 
+  select(metric, value2009, value2020, diferencia, scale, everything())
+
+###Guardar la tabla con todas las métricas de paisaje a todas las escalas
+# a partir de esta tabla se pueden filtrar las  métricas finales para generar los gráficos
+write.csv(tm_suprema_paisaje, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_paisaje_todas_escalas.csv")
+
+
+```
+
+
+########### GRÁFICOS DE PAISAJE FINALES A TODAS LAS ESCALAS DEFINITIVOOO ################
+
+```{r}
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+
+tm_suprema_paisaje <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_paisaje_todas_escalas.csv")
+
+unique(tm_suprema_paisaje$scale)
+#seleccionando solo las métricas de paisaje finales y nueva columna con los grupos de escala espacial 
+finales_paisaje <- tm_suprema_paisaje %>% 
+          filter(metric %in% c("lsi", "ai", "shdi", "pd")) %>%
+             mutate(escala = case_when(
+             scale == "Estado" ~ "Estado",
+             scale == "COBIOCOM" ~ "COBIOCOM",
+            TRUE ~ "ANPs"))  # Para el resto de los valores
+
+
+head(finales_paisaje)
+unique(finales_paisaje$escala)
+
+##  GRAFICAR LAS MÉTRICAS DE PAISAJE FINALES
+
+#GRAFICOS
+#paqueterías para graficar
+library(pacman)
+p_load(ggridges, ggplot2, viridis, hrbrthemes)
+
+#LOOP PARA GENERAR LOS GRÁFICOS POR CADA MÉTRICA
+
+#modificar de acuerdo a la tabla de paisaje:
+ 
+metricas_unidades_psj <- data.frame(
+  metrica = c("lsi", "pd", "ai", "shdi"),
+  unidades = c("valor propio de la métrica, LSI >= 1 sin límite", "Valor propio de la métrica por cada 100 ha, 0 < PD <= 1e+06", "Porcentaje, 0 <= AI <= 100", "Valor propio de la métrica, SHDI >= 0"),
+  nombres_metricas = c("Índice de forma del paisaje (lsi)", "Densidad de parches (pd)", "Índice de agregación (ai)", "Índice de diversidad de Shannon (shdi)")
+)
+
+metricas_finales_psj <- metricas_unidades_psj$metrica
+unidades_psj <- metricas_unidades_psj$unidades
+nombres_metricas_psj <- metricas_unidades_psj$nombres_metricas
+filter <- dplyr::filter
+
+
+# Itera sobre cada métrica para crear los gráficos ORIGINAL 
+plot_list_psj <- list()  # Inicializa una lista para guardar los gráficos
+
+
+for (i in seq_along(metricas_finales_psj)) {
+  graf_psj <- finales_paisaje %>%
+    filter(metric == metricas_finales_psj[i]) %>%
+    ggplot(aes(x = reorder(scale, diferencia), y = diferencia, fill = scale)) +  # Reordenar de mayor a menor
+    geom_bar(stat = "identity", alpha = 0.6, width = 0.4, position = position_dodge(width = 0.5)) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+    coord_flip() +
+    xlab("Escala espacial") +
+    ylab("Diferencia del año 2020 - 2009") +
+    ggtitle(paste0("Cambio en métrica de paisaje: ", nombres_metricas_psj[i])) +
+    labs(subtitle = paste0("Unidades de la métrica: ",unidades_psj[i]), fill = "Cambio") +  # Añade el subtítulo con las unidades
+    theme_bw() +
+  scale_fill_manual(values = c("Estado" = "darkorange3", "COBIOCOM" = "#66CDAA", "ANPs" = "#838B8B"))+
+    guides(fill = guide_legend(title = "Escala espacial")) +
+    theme(
+      plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),  # Ajusta el tamaño y centra el título
+      plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),  # Ajusta el subtítulo
+      plot.margin = margin(t = 10, r = 5, b = 5, l = 5)  # Ajusta los márgenes del gráfico
+    )
+  
+  plot_list_psj[[i]] <- graf_psj         
+  
+  ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_paisaje_escalas_", metricas_finales_psj[i], ".png"), 
+        plot = graf_psj, width = 10, height = 8, dpi = 300)
+}
+
+# Mostrar el primer gráfico como ejemplo
+plot_list_psj[[1]]
+
+
+### Intento 2 Funcionó parcialmente :/
+
+library(grid)
+
+plot_list_psj <- list()
+
+library(ggplot2)
+library(grid)
+library(gridExtra)
+
+create_legend <- function() {
+  legend_plot <- ggplot() +
+    theme_void() +
+    theme(plot.margin = margin(5.5, 5.5, 5.5, 5.5))
+  
+  colors <- c("darkorange3", "#66CDAA", "#838B8B")
+  labels <- c("Estado", "COBIOCOM", "ANPs")
+  
+  for (i in 1:3) {
+    legend_plot <- legend_plot +
+      annotation_custom(
+        grob = rectGrob(gp = gpar(fill = colors[i], col = "black")),
+        xmin = 0, xmax = 0.2, ymin = 1 - i*0.2, ymax = 1.15 - i*0.2
+      ) +
+      annotation_custom(
+        grob = textGrob(labels[i], hjust = 0, gp = gpar(fontsize = 10)),
+        xmin = 0.25, xmax = 1, ymin = 1 - i*0.2, ymax = 1.15 - i*0.2
+      )
+  }
+  
+  legend_plot <- legend_plot +
+    annotation_custom(
+      grob = textGrob("Escala espacial", gp = gpar(fontface = "bold", fontsize = 12)),
+      xmin = 0, xmax = 1, ymin = 0.9, ymax = 1
+    )
+  
+  return(legend_plot)
+}
+
+for (i in seq_along(metricas_finales_psj)) {
+  graf_psj <- finales_paisaje %>%
+    filter(metric == metricas_finales_psj[i]) %>%
+    ggplot(aes(x = reorder(scale, diferencia), y = diferencia, fill = scale)) +
+    geom_bar(stat = "identity", alpha = 0.6, width = 0.4, position = position_dodge(width = 0.5)) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+    coord_flip() +
+    xlab("Escala espacial") +
+    ylab("Diferencia del año 2020 - 2009") +
+    ggtitle(paste0("Cambio en métrica de paisaje: ", nombres_metricas_psj[i])) +
+    labs(subtitle = paste0("Unidades de la métrica: ",unidades_psj[i])) +
+    theme_bw() +
+    scale_fill_manual(values = c("Estado" = "darkorange3", "COBIOCOM" = "#66CDAA")) +
+    theme(
+      plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),
+      plot.margin = margin(5.5, 5.5, 5.5, 5.5),
+      legend.position = "none"
+    )
+  
+  legend <- create_legend()
+  
+  combined_plot <- grid.arrange(graf_psj, legend, ncol = 2, widths = c(4, 1))
+  
+  plot_list_psj[[i]] <- combined_plot
+  
+  #ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_paisaje_escalas_", metricas_finales_psj[i], ".png"), 
+   #      plot = combined_plot, width = 12, height = 8, dpi = 300)
+}
+
+```
+
+
+
+
+#GRAFICANDO EL CAMBIO EN LAS MÉTRICAS DE PAISAJE
+```{r}
+#gráficos solo con las métricas finales de clase propuestas:
+#Filtrando el subset de datos
+analisis_cambio_psj_edo <- cambio_paisaje_edo %>% mutate(escala="ESTADO")
+
+analisis_cambio_psj_cbcm <- cambio_paisaje_cobiocom %>% mutate(escala="COBIOCOM")
+
+#Uniendo los datos de las dos escalas en el mismo dataframe 
+
+cambio_psj_combinadas <- rbind(analisis_cambio_psj_edo, analisis_cambio_psj_cbcm) #pegar filas abajo
+
+#Tabla para exportar y modificar
+tabla_madre_psj <- rbind(analisis_cambio_psj_edo %>% mutate(escala="ESTADO"), analisis_cambio_psj_cbcm  %>% mutate(escala="COBIOCOM")) 
+
+write.csv(tabla_madre_psj, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_todas_paisaje_edovscobiocom.csv")
+
+abrv_metrics <- lsm_abbreviations_names
+
+
+#Leyendo la tabla una vez guardada
+tabla_madre_psj <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/diferencia_todas_paisaje_edovscobiocom.csv")
+
+## MÉTRICAS A GRAFICAR 
+# 	"shdi", 
+
+#GRAFICOS
+#paqueterías para graficar
+library(pacman)
+p_load(ggridges, ggplot2, viridis, hrbrthemes)
+
+#definir colores y niveles para los gráficos
+colores <- c("Estado" = "#CD8162", "COBIOCOM" = "#698B69")
+etiquetas <- c("Estado" = "Estado", "COBIOCOM" = "COBIOCOM")
+cambio_psj_combinadas$escala <- factor(cambio_psj_combinadas$escala, levels = c("Estado", "COBIOCOM"))  
+
+#par(mar=c(6,4,4,4))
+
+#Tipos de métricas a nivel de paisaje
+unique(tabla_madre_psj$tipo_metrica) #[1] "aggregation metric"   "area and edge metric" "core area metric"     "shape metric"       "complexity metric"    "diversity metric"    
+
+colnames(tabla_madre_psj)
+
+#MÉTRICAS FINALES PAISAJE
+
+#LOOP PARA GENERAR LOS GRÁFICOS POR CADA MÉTRICA
+
+#modificar de acuerdo a la tabla de paisaje:
+ 
+metricas_unidades_psj <- data.frame(
+  metrica = c("lsi", "pd", "ai", "shdi"),
+  unidades = c("valor propio de la métrica, LSI >= 1 sin límite", "Valor propio de la métrica por cada 100 ha, 0 < PD <= 1e+06", "Porcentaje, 0 <= AI <= 100", "Valor propio de la métrica, SHDI >= 0"),
+  nombres_metricas = c("Índice de forma del paisaje (lsi)", "Densidad de parches (pd)", "Índice de agregación (ai)", "Índice de diversidad de Shannon (shdi)")
+)
+
+
+filter <- dplyr::filter
+
+# Itera sobre cada métrica para crear los gráficos
+plot_list_psj <- list()  # Inicializa una lista para guardar los gráficos
+
+metricas_finales_psj <- metricas_unidades_psj$metrica
+unidades_psj <- metricas_unidades_psj$unidades
+nombres_metricas_psj <- metricas_unidades_psj$nombres_metricas
+
+for (i in seq_along(metricas_finales_psj)) {
+  graf_psj <- tabla_madre_psj %>%
+    filter(metrica == metricas_finales_psj[i]) %>%
+    ggplot(aes(x = escala, y = diferencia, fill = escala)) +
+    geom_bar(stat = "identity", alpha = 0.6, width = 0.4, position = position_dodge(width = 0.5)) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "red") +
+    coord_flip() +
+    xlab("Escala") +
+    ylab("Diferencia del año 2009 a 2020") +
+    ggtitle(paste0("Cambio en métrica de paisaje: ", nombres_metricas_psj[i])) +
+    labs(subtitle = paste0("Unidades de la métrica: ",unidades_psj[i]), fill = "Cambio") +  # Añade el subtítulo con las unidades
+    theme_bw() +
+    scale_fill_manual(values = colores, labels = etiquetas) +
+    guides(fill = guide_legend(title = "Escala")) +
+    theme(
+      plot.title = element_text(size = 12, hjust = 0.5, vjust = 1.5),  # Ajusta el tamaño y centra el título
+      plot.subtitle = element_text(size = 10, hjust = 0.5, vjust = 1),  # Ajusta el subtítulo
+      plot.margin = margin(t = 10, r = 5, b = 5, l = 5)  # Ajusta los márgenes del gráfico
+    )
+  
+  plot_list_psj[[i]] <- graf_psj         
+ # print(plot_list_psj[[i]])
+  
+  ggsave(filename = paste0("D:/mapas_gto/UTM/conectividad_estructural/resultados/analisis_cambio/cambio_paisaje_", metricas_finales_psj[i], ".png"), 
+       plot = graf_psj, width = 10, height = 8, dpi = 300)
+}
+
+
+#Me quedé aquí 28/08/2024
+ 
+```
+
+
+## Resultados del 3er informe.
+Esta parte la hice solo para generar algunas tablas en formato ancho para el informe y mapas de las métricas de parche para los años 2009 y 2020 Edo.
+```{r}
+files_csv <- list.files(path = "D:/mapas_gto/UTM/conectividad_estructural/resultados/", pattern = "*.csv$",
+                    full.names = T)
+
+list_parche_edo <- files_csv[str_detect(files_csv, "todas_parche_edo")] %>% lapply(., read.csv)
+ 
+parche_edo09 <- as.data.frame(list_parche_edo[[1]]) 
+parche_edo20 <- as.data.frame(list_parche_edo[[2]]) 
+
+edo_metrics_parche20 <- parche_edo20 %>% pivot_wider(id_cols = c(id,class,tipo), names_from = metric, values_from = value) %>% print()
+
+#Como métricas finales usaremos area, circle, ncore, cai, enn
+
+finales_parche_edo20 <- edo_metrics_parche20 %>% select(class,tipo,area, circle, ncore, cai, enn)
+
+write.csv(finales_parche_edo20,   file="D:/mapas_gto/UTM/conectividad_estructural/informe/finales_parche_edo20.csv")
+
+### Mapas de las métricas finales
+
+show_lsm(edo20, what = "lsm_p_area", directions = 4)
+show_lsm(edo20, what = "lsm_p_circle", directions = 4)
+show_lsm(edo20, what = "lsm_p_ncore", directions = 4)
+show_lsm(edo20, what = "lsm_p_cai", directions = 4)
+show_lsm(edo20, what = "lsm_p_enn", directions = 4)
+```
+
+
+##REPORTE FINAL
+Este código se usará para generar gráficos para el reporte final (Septiembre 2024)
+
+```{r}
+#METRICAS DE PARCHE finales
+patch_edo09 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/parche_estado_2009.csv") %>% filter(metric %in% c("area", "shape", "circle", "ncore", "cai", "enn")) 
+    export(patch_edo09, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/finales/parche_estado_2009_finales.csv")
+ 
+patch_edo20 <- read.csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/parche_estado_2020.csv") %>% filter(metric %in% c("area", "shape", "circle", "ncore", "cai", "enn")) 
+    export(patch_edo20, file = "D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/finales/parche_estado_2020_finales.csv")
+ 
+
+```
+
+##Gráficos elaborados en ggplot2 -chatgpt
+
+```{r}
+# Cargar librerías necesarias
+library(ggplot2)
+library(dplyr)
+library(readr)
+
+# Leer el archivo CSV
+data09 <- read_csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/finales/parche_estado_2009_finales.csv")
+
+# Crear gráficos de barras por cada métrica
+unique_metrics <- unique(data09$metric)
+
+for (metric in unique_metrics) {
+  # Filtrar los datos por la métrica actual
+  metric_data <- data %>% filter(metric == !!metric)
+  
+  # Crear el gráfico de barras
+  plot <- ggplot(metric_data, aes(x = categoria, y = value)) +
+    geom_bar(stat = "identity") +
+    labs(title = paste("Métrica:", metric),
+         x = "Categoría",
+         y = "Valor") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Guardar el gráfico como archivo
+  ggsave(filename = paste0("grafico_", metric, ".png"), plot = plot, width = 10, height = 6)
+}
+
+```
+
+
+#ANÁLISIS DE CAMBIO MÉTRICAS DE PARCHE - ESTADÍSTICA DESCRIPTIVA
+
+```{r}
+#estadísticos de resumen para la métrica area - Edo - 2009 
+
+data09 <- read_csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2009/finales/parche_estado_2009_finales.csv")
+
+head(data09)
+
+data20 <- read_csv("D:/mapas_gto/UTM/conectividad_estructural/resultados/2020/finales/parche_estado_2020_finales.csv")
+head(data20)
+
+#Función para generar los estadísticos de resumen para las siguientes métricas:
+#  "area"   "cai"    "circle" "enn"    "ncore"  "shape"  
+unique(data09$metric) #se guardarán en ese orden en la lista de resultados, un data frame por cada métrica
+
+metr <- as.list(unique(data09$metric))
+
+finales_parche_resumen <- lapply(metr, function(m) {
+  data09 %>% 
+    select(class, type, metric, value, categoria) %>% 
+    filter(metric == m) %>%  
+    group_by(categoria) %>% 
+    summarise(
+      num.parches.2009 = n(),
+      min.2009 = min(value, na.rm = TRUE),
+      max.2009 = max(value, na.rm = TRUE),
+      media.2009 = mean(value, na.rm = TRUE),
+      desv.est.2009 = sd(value, na.rm = TRUE)
+    )
+})  #faltaría que al resultado le pegue la columna 'métrica' y unir todas las tablas en formato largo
+
+metr20 <- as.list(unique(data20$metric))
+
+finales_parche_resumen20 <- lapply(metr20, function(x) {
+  data20 %>% 
+    select(class, type, metric, value, categoria) %>% 
+    filter(metric == x) %>%  
+    group_by(categoria) %>% 
+    summarise(
+      num.parches.2020 = n(),
+      min.2020 = min(value, na.rm = TRUE),
+      max.2020 = max(value, na.rm = TRUE),
+      media.2020 = mean(value, na.rm = TRUE),
+      desv.est.2020 = sd(value, na.rm = TRUE)
+    )
+}) 
+
+#Haciendo unión de los datos para los dos años solo de la métrica AREA:
+est_descr_area <- left_join(finales_parche_resumen[[1]],finales_parche_resumen20[[1]], by = "categoria")
+
+colnames(est_descr_area)
+
+#FUNCIÓN PARA TODAS LAS MÉTRICAS:
+
+merge_and_sort_list <- function(list1, list2) {
+  merged_list <- list()
+  
+  for (i in seq_along(list1)) {
+    # Realiza el left join entre los dataframes correspondientes en ambas listas
+    merged_df <- left_join(list1[[i]], list2[[i]], by = "categoria")
+    
+    # Ordena las columnas: primero 'categoria', luego las demás en orden alfabético
+    column_order <- c("categoria", "num.parches.2009", "num.parches.2020", "min.2009", "min.2020",
+                      "max.2009", "max.2020", "media.2009", "media.2020", "desv.est.2009","desv.est.2020")   #sort(setdiff(names(merged_df), "categoria"))) #por orden alfabético
+    merged_df <- merged_df[, column_order]
+    
+    # Guarda el dataframe resultante en la lista
+    merged_list[[i]] <- merged_df
+  }
+  
+  return(merged_list)
+}
+
+# Uso de la función
+est_descr_area <- merge_and_sort_list(finales_parche_resumen, finales_parche_resumen20)
+  
+for(i in 1:length(est_descr_area)){
+  export(est_descr_area[[i]], file = paste0("D://mapas_gto//UTM//conectividad_estructural//resultados//analisis_cambio//estadisticos_parche_", metr[i], ".csv"))
+  }
+
+```
+
+
+#Notas para el análisis de conectividad
+Notas para los nodos a conectar (lo que platicamos con Pipo el 21 de junio de 2024): 
+
+1) Usar parches con los tipos de cubierta natural como nodos: evaluar cuántos o qué superficie de esos parches están protegidos (dentro de las anps, cobiocom) y los que no y se podría evaluar la riqueza que esos nodos albergan.
+2) IIC: hacer escenarios donde se supongan especies hipotéticas de baja, media y alta movilidad para obtener el valor del índice y poder correlacionarlo con la diversidad alfa (esto último opcional).
